@@ -1,0 +1,394 @@
+
+CREATE TABLE cinema_movies
+(
+film_id NUMBER PRIMARY KEY,
+film_name VARCHAR2(100),
+ticket_price NUMBER
+);
+
+
+CREATE TABLE movie_shows
+(
+show_no NUMBER PRIMARY KEY,
+film_id NUMBER,
+show_date DATE,
+seats_left NUMBER,
+ 
+FOREIGN KEY(film_id)
+REFERENCES cinema_movies(film_id)
+);
+
+
+CREATE TABLE viewers
+(
+viewer_id NUMBER PRIMARY KEY,
+viewer_name VARCHAR2(100),
+mobile_no VARCHAR2(15)
+);
+
+
+
+CREATE TABLE ticket_reservations
+(
+reservation_id NUMBER PRIMARY KEY,
+viewer_id NUMBER,
+show_no NUMBER,
+no_of_tickets NUMBER,
+reservation_date DATE,
+booking_status VARCHAR2(20),
+ 
+FOREIGN KEY(viewer_id)
+REFERENCES viewers(viewer_id),
+ 
+FOREIGN KEY(show_no)
+REFERENCES movie_shows(show_no)
+);
+
+
+
+CREATE TABLE payment_details
+(
+payment_id NUMBER PRIMARY KEY,
+reservation_id NUMBER,
+amount_paid NUMBER,
+ 
+FOREIGN KEY(reservation_id)
+REFERENCES ticket_reservations(reservation_id)
+);
+
+
+
+INSERT INTO cinema_movies
+VALUES(1,'Avengers Endgame',250);
+ 
+INSERT INTO cinema_movies
+VALUES(2,'Jawan',200);
+ 
+INSERT INTO movie_shows
+VALUES(101,1,SYSDATE,100);
+ 
+INSERT INTO movie_shows
+VALUES(102,2,SYSDATE,80);
+ 
+INSERT INTO viewers
+VALUES(1,'Rahul','9876543210');
+ 
+COMMIT;
+
+
+CREATE OR REPLACE FUNCTION fn_total_amount
+(
+p_show_no NUMBER,
+p_tickets NUMBER
+)
+RETURN NUMBER
+IS
+ 
+v_price cinema_movies.ticket_price%TYPE;
+v_amount NUMBER;
+ 
+BEGIN
+ 
+SELECT m.ticket_price
+INTO v_price
+FROM cinema_movies m,
+movie_shows s
+WHERE m.film_id=s.film_id
+AND s.show_no=p_show_no;
+ 
+v_amount := v_price * p_tickets;
+ 
+RETURN v_amount;
+ 
+END;
+/
+
+
+
+CREATE OR REPLACE PROCEDURE pr_book_ticket
+(
+p_reservation_id NUMBER,
+p_viewer_id NUMBER,
+p_show_no NUMBER,
+p_tickets NUMBER
+)
+IS
+ 
+v_available NUMBER;
+ 
+BEGIN
+ 
+SELECT seats_left
+INTO v_available
+FROM movie_shows
+WHERE show_no=p_show_no;
+ 
+IF p_tickets > v_available THEN
+ 
+DBMS_OUTPUT.PUT_LINE(
+'Not Enough Seats');
+ 
+ELSE
+ 
+INSERT INTO ticket_reservations
+(
+reservation_id,
+viewer_id,
+show_no,
+no_of_tickets,
+reservation_date,
+booking_status
+)
+VALUES
+(
+p_reservation_id,
+p_viewer_id,
+p_show_no,
+p_tickets,
+SYSDATE,
+'CONFIRMED'
+);
+ 
+UPDATE movie_shows
+SET seats_left =
+seats_left - p_tickets
+WHERE show_no = p_show_no;
+ 
+COMMIT;
+ 
+DBMS_OUTPUT.PUT_LINE(
+'Booking Successful');
+ 
+END IF;
+ 
+EXCEPTION
+ 
+WHEN NO_DATA_FOUND THEN
+DBMS_OUTPUT.PUT_LINE(
+'Show Not Found');
+ 
+WHEN OTHERS THEN
+DBMS_OUTPUT.PUT_LINE(SQLERRM);
+ 
+END;
+/
+
+
+CREATE OR REPLACE PROCEDURE pr_make_payment
+(
+p_payment_id NUMBER,
+p_reservation_id NUMBER
+)
+IS
+ 
+v_show NUMBER;
+v_tickets NUMBER;
+v_amount NUMBER;
+ 
+BEGIN
+ 
+SELECT show_no,
+no_of_tickets
+INTO v_show,
+v_tickets
+FROM ticket_reservations
+WHERE reservation_id =
+p_reservation_id;
+ 
+v_amount :=
+fn_total_amount(
+v_show,
+v_tickets);
+ 
+INSERT INTO payment_details
+VALUES(
+p_payment_id,
+p_reservation_id,
+v_amount
+);
+ 
+COMMIT;
+ 
+DBMS_OUTPUT.PUT_LINE(
+'Payment Success');
+ 
+DBMS_OUTPUT.PUT_LINE(
+'Amount = '||v_amount);
+ 
+END;
+/
+
+
+CREATE OR REPLACE PROCEDURE pr_cancel_ticket
+(
+p_reservation_id NUMBER
+)
+IS
+ 
+v_show NUMBER;
+v_tickets NUMBER;
+ 
+BEGIN
+ 
+SELECT show_no,
+no_of_tickets
+INTO v_show,
+v_tickets
+FROM ticket_reservations
+WHERE reservation_id =
+p_reservation_id;
+ 
+UPDATE movie_shows
+SET seats_left =
+seats_left + v_tickets
+WHERE show_no = v_show;
+ 
+DELETE FROM ticket_reservations
+WHERE reservation_id =
+p_reservation_id;
+ 
+COMMIT;
+ 
+DBMS_OUTPUT.PUT_LINE(
+'Ticket Cancelled');
+ 
+END;
+/
+
+
+CREATE TABLE reservation_audit
+(
+reservation_id NUMBER,
+audit_date DATE
+);
+ 
+
+CREATE OR REPLACE TRIGGER trg_reservation_audit
+AFTER INSERT
+ON ticket_reservations
+FOR EACH ROW
+BEGIN
+ 
+INSERT INTO reservation_audit
+VALUES(
+:NEW.reservation_id,
+SYSDATE
+);
+ 
+END;
+/
+
+
+CREATE OR REPLACE PACKAGE cinema_pkg
+AS
+ 
+PROCEDURE pr_book_ticket
+(
+p_reservation_id NUMBER,
+p_viewer_id NUMBER,
+p_show_no NUMBER,
+p_tickets NUMBER
+);
+ 
+FUNCTION fn_total_amount
+(
+p_show_no NUMBER,
+p_tickets NUMBER
+)
+RETURN NUMBER;
+ 
+END cinema_pkg;
+/
+
+
+
+CREATE OR REPLACE PACKAGE BODY cinema_pkg
+AS
+ 
+FUNCTION fn_total_amount
+(
+p_show_no NUMBER,
+p_tickets NUMBER
+)
+RETURN NUMBER
+IS
+v_price NUMBER;
+BEGIN
+ 
+SELECT m.ticket_price
+INTO v_price
+FROM cinema_movies m,
+movie_shows s
+WHERE m.film_id=s.film_id
+AND s.show_no=p_show_no;
+ 
+RETURN v_price*p_tickets;
+ 
+END;
+ 
+PROCEDURE pr_book_ticket
+(
+p_reservation_id NUMBER,
+p_viewer_id NUMBER,
+p_show_no NUMBER,
+p_tickets NUMBER
+)
+IS
+BEGIN
+ 
+INSERT INTO ticket_reservations
+VALUES
+(
+p_reservation_id,
+p_viewer_id,
+p_show_no,
+p_tickets,
+SYSDATE,
+'CONFIRMED'
+);
+ 
+END;
+ 
+END cinema_pkg;
+/
+
+
+
+Testing--
+
+Book Ticket:
+
+SQL
+BEGIN
+pr_book_ticket(
+1,
+1,
+101,
+3
+);
+END;
+/
+
+Check Reservation:
+
+SQL
+SELECT * FROM ticket_reservations;
+
+Make Payment:
+
+SQL
+BEGIN
+pr_make_payment(
+1,
+1
+);
+END;
+/
+
+Cancel Ticket:
+
+SQL
+BEGIN
+pr_cancel_ticket(1);
+END;
+/
